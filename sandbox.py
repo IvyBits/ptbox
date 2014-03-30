@@ -122,7 +122,7 @@ if __name__ == "__main__":
         i = 0
         in_syscall = False
         while True:
-            __, status, rusage = os.wait4(pid, 0)
+            _, status, rusage = os.wait4(pid, 0)
 
             if os.WIFEXITED(status):
                 print "Exited"
