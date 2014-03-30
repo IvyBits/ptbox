@@ -2,15 +2,88 @@ import os
 import sys
 import time
 import resource
+import argparse
+import re
 from signal import *
 
 from ptbox import *
 
 
+class nix_Process(object):
+    def __init__(self, chained, memory_limit):
+        self._chained = chained
+        self.stdout = chained.stdout
+        self.stdin = chained.stdin
+        self.usages = None
+        self.returncode = None
+        self.memory_limit = memory_limit
+
+    def __getattr__(self, name):
+        if name in ["wait", "send_signal", "terminate", "kill"]:
+            return getattr(self._chained, name)
+        return object.__getattribute__(self, name)
+
+    def poll(self):
+        a = self._chained.poll()
+        if a is not None:
+            self.returncode = self._get_usages()[-1]
+            return self.returncode
+        return None
+
+    def _get_usages(self):
+        """
+            Returns an array containing [bool tle, int max memory usage (kb), int runtime, int error code]
+        """
+        if not self.usages:
+            self.usages = map(eval, self._chained.stderr.readline().split())
+        return self.usages
+
+    def get_tle(self):
+        return self._get_usages()[0]
+
+    def get_mle(self):
+        return self._get_usages()[1] > self.memory_limit
+
+    def get_execution_time(self):
+        return self._get_usages()[2]
+
+    def get_max_memory(self):
+        return self._get_usages()[1]
+
+
+def execute(args, time=None, memory=None, fork=True):
+    p_args = [sys.executable, __file__]
+    if time:
+        p_args += ["-t", str(time)]
+    if memory:
+        p_args += ["-m", str(memory)]
+    if not fork:
+        p_args.append("-nf")
+    p_args.append("--")
+    p_args += args
+    process = subprocess.Popen(p_args,
+                               stdin=subprocess.PIPE,
+                               stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE)
+    return nix_Process(process, memory)
+
+
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Runs and monitors a process' usage stats on *nix systems")
+    parser.add_argument("child_args", nargs="+", help="The child process path followed by arguments; relative allowed")
+    parser.add_argument("-t", "--time", type=float, help="Time to limit process to, in seconds")
+    parser.add_argument("-m", "--memory", type=int, help="Memory to limit process to, in kb")
+    parser.add_argument("-fs", "--filesystem-access", help="':'-delimited directory masks; regex allowed")
+    parsed = parser.parse_args()
+
+    child = parsed.child_args[0]
+    child_args = parsed.child_args
+
+    fs_jail = [re.compile(mask) for mask in
+               (parsed.filesystem_access.split(':') if parsed.filesystem_access else ['*'])]
+
     proc_mem = None
     do_allow = lambda: True
-
 
     def do_write():
         fd = arg0(pid)
@@ -46,11 +119,12 @@ if __name__ == "__main__":
                         break
                     page = 4096
                 print buf,
-                for file in ["/usr/bin/python"]:
-                    if buf.startswith(file):
+                for mask in fs_jail:
+                    if mask.match(buf):
+                        print "Masked", mask,
                         break
                 else:
-                    return True
+                    return False
 
         except:
             import traceback
@@ -62,7 +136,7 @@ if __name__ == "__main__":
         mode = ctypes.c_size_t(arg2(pid)).value
         if mode:
             print mode,
-            # TODO: return False
+            # TODO: kill
         return do_access()
 
     # @formatter:off
@@ -104,19 +178,17 @@ if __name__ == "__main__":
     }
     # @formatter:on
 
-    child = sys.argv[1]
-    args = sys.argv[1:]
-
     rusage = None
     status = None
 
     mem = None
     pid = os.fork()
     if not pid:
-        resource.setrlimit(resource.RLIMIT_AS, (32 * 1024 * 1024,) * 2)
+        if parsed.memory:
+            resource.setrlimit(resource.RLIMIT_AS, (32 * 1024 * 1024,) * 2)
         ptrace(PTRACE_TRACEME, 0, None, None)
         os.kill(os.getpid(), SIGSTOP)
-        os.execvp(child, args)
+        os.execvp(child, child_args)
     else:
         start = time.time()
         i = 0
@@ -156,7 +228,7 @@ if __name__ == "__main__":
             os.kill(pid, SIGKILL)
             _, status, rusage = os.wait4(pid, 0)
             print 'Time Limit Exceeded'
-        print rusage.ru_maxrss + rusage.ru_isrss, 'KB of RAM'
+        print rusage.ru_maxrss, 'KB of RAM'
         print 'Execution time: %.3f seconds' % duration
         print 'Return:', os.WEXITSTATUS(status)
 
