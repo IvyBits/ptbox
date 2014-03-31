@@ -1,11 +1,11 @@
 import os
+import subprocess
 import sys
 import time
 import resource
 import argparse
 import re
 from signal import *
-
 from ptbox import *
 
 
@@ -58,7 +58,7 @@ def execute(args, time=None, memory=None, filesystem=None):
     if memory:
         p_args += ["-m", str(memory)]
     if filesystem:
-        p.args += ["-fs", ':'.join(filesystem)]
+        p_args += ["-fs", ':'.join(filesystem)]
 
     p_args.append("--")
     p_args += args
@@ -81,7 +81,7 @@ if __name__ == "__main__":
     child_args = parsed.child_args
 
     fs_jail = [re.compile(mask) for mask in
-               (parsed.filesystem_access.split(':') if parsed.filesystem_access else ['*'])]
+               (parsed.filesystem_access.split(':') if parsed.filesystem_access else ['.*'])]
 
     proc_mem = None
     do_allow = lambda: True
@@ -188,8 +188,21 @@ if __name__ == "__main__":
         if parsed.memory:
             resource.setrlimit(resource.RLIMIT_AS, (32 * 1024 * 1024,) * 2)
         ptrace(PTRACE_TRACEME, 0, None, None)
+        # Merge the stderr (2) into stdout (1) so that the execute
+        # may be able to return usage stats through stderr
+        os.dup2(1, 2)
+        # Close all file descriptors that are not standard
+        os.closerange(3, os.sysconf("SC_OPEN_MAX"))
         os.kill(os.getpid(), SIGSTOP)
+        # Replace current process with the child process
+        # This call does not return
         os.execvp(child, child_args)
+        # Unless it does, of course, in which case you're screwed
+        # We don't cover this in the warranty
+        #  When you reach here, you are screwed
+        # As much as being handed control of a MySQL server without
+        # ANY SQL knowledge or docs. ENJOY.
+        os._exit(3306)
     else:
         start = time.time()
         i = 0
