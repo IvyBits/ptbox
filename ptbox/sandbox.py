@@ -83,46 +83,14 @@ if __name__ == "__main__":
     fs_jail = [re.compile(mask) for mask in
                (parsed.filesystem_access.split(':') if parsed.filesystem_access else ['.*'])]
 
-    def syscall(func):
-        def delegate():
-            if func():
-                ptrace(PTRACE_SYSCALL, pid, None, None)
-                return True
-            return False
-        return delegate
-
-    def unsafe_syscall(func):
-        """
-            ptrace recieves notifications prior to the kernel reading the memory pointed to by the registers.
-            It is theoretically possible to modify a pointer after ptbox finishes validation but
-            before the memory is actually accessed, given a multiprocess task.
-
-            Hence, here we stop all child tasks (SIGSTOP), execute the syscall, then resume all tasks (SIGCONT).
-        """
-        def halter():
-            tasks = map(int, os.listdir("/proc/%d/task" % os.getpid()))
-            tasks.remove(os.getpid())
-            print tasks, os.getpid()
-            if tasks:
-                for task in tasks:
-                    os.kill(task, SIGSTOP)
-            ret = func()
-            if ret:
-                ptrace(PTRACE_SYSCALL, pid, None, None)
-            if tasks:
-                for task in tasks:
-                    os.kill(task, SIGCONT)
-            return ret
-        return halter
-
     proc_mem = None
 
     @syscall
-    def do_allow():
+    def do_allow(pid):
         return True
 
     @syscall
-    def do_write():
+    def do_write(pid):
         fd = arg0(pid)
         # Only allow writing to stdout & stderr
         print fd,
@@ -132,15 +100,14 @@ if __name__ == "__main__":
     execve_count = 0
 
     @unsafe_syscall
-    def do_execve():
+    def do_execve(pid):
         global execve_count
         execve_count += 1
         if execve_count > 2:
             return False
         return True
 
-    @unsafe_syscall
-    def do_access():
+    def __do_access(pid):
         global proc_mem
         try:
             addr = ctypes.c_uint(arg0(pid)).value
@@ -170,12 +137,17 @@ if __name__ == "__main__":
             traceback.print_exc()
         return True
 
-    def do_open():
+    @unsafe_syscall
+    def do_access(pid):
+        return __do_access(pid)
+
+    @unsafe_syscall
+    def do_open(pid):
         mode = ctypes.c_int(arg2(pid)).value
         if mode:
             print mode,
             # TODO: kill
-        return do_access()
+        return __do_access(pid)
 
     # @formatter:off
     proxied_syscalls = {
@@ -192,7 +164,7 @@ if __name__ == "__main__":
         sys_munmap:             do_allow,
         sys_brk:                do_allow,
         sys_fcntl:              do_allow,
-        sys_arch_prctl:         do_allow,  # TODO: is this safe?
+        sys_arch_prctl:         do_allow,
         sys_set_tid_address:    do_allow,
         sys_set_robust_list:    do_allow,
         sys_futex:              do_allow,
@@ -262,7 +234,7 @@ if __name__ == "__main__":
                     print reverse_syscalls[call],
 
                     if call in proxied_syscalls:
-                        if not proxied_syscalls[call]():
+                        if not proxied_syscalls[call](pid):
                             os.kill(pid, SIGKILL)
                             print
                             print "You're doing Something Bad"
