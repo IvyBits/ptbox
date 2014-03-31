@@ -122,7 +122,6 @@ if __name__ == "__main__":
                 print buf,
                 for mask in fs_jail:
                     if mask.match(buf):
-                        print "Masked", mask,
                         break
                 else:
                     return False
@@ -134,7 +133,7 @@ if __name__ == "__main__":
         return True
 
     def do_open():
-        mode = ctypes.c_size_t(arg2(pid)).value
+        mode = ctypes.c_int(arg2(pid)).value
         if mode:
             print mode,
             # TODO: kill
