@@ -22,5 +22,9 @@ class ctype_primitive_wrapper(object):
 
     def __getattr__(self, name):
         if name.startswith("as_"):
-            return getattr(getattr(ctypes, "c_%s" % name[3:])(self.value), "value")
+            try:
+                return getattr(ctypes, "c_%s" % name[3:])(self.value).value
+            except AttributeError:
+                # Let it fail from the object
+                pass
         return object.__getattribute__(self, name)
