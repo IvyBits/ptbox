@@ -173,7 +173,7 @@ if __name__ == "__main__":
         sys_getdents:           do_allow,
         sys_lseek:              do_allow,
 
-        sys_clone:              do_allow,
+       # sys_clone:              do_allow,
         sys_exit_group:         do_allow,
     }
     # @formatter:on
