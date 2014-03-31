@@ -51,14 +51,15 @@ class nix_Process(object):
         return self._get_usages()[1]
 
 
-def execute(args, time=None, memory=None, fork=True):
+def execute(args, time=None, memory=None, filesystem=None):
     p_args = [sys.executable, __file__]
     if time:
         p_args += ["-t", str(time)]
     if memory:
         p_args += ["-m", str(memory)]
-    if not fork:
-        p_args.append("-nf")
+    if filesystem:
+        p.args += ["-fs", ':'.join(filesystem)]
+
     p_args.append("--")
     p_args += args
     process = subprocess.Popen(p_args,
