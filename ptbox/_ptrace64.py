@@ -29,7 +29,7 @@ ES = 24
 FS = 25
 GS = 26
 
-read_reg = lambda pid, reg: ptrace(PTRACE_PEEKUSR, pid, 8 * reg, None)
+read_reg = lambda pid, reg: ctype_primitive_wrapper(ptrace(PTRACE_PEEKUSR, pid, 8 * reg, None))
 arg0 = lambda pid: read_reg(pid, RDI)
 arg1 = lambda pid: read_reg(pid, RSI)
 arg2 = lambda pid: read_reg(pid, RDX)

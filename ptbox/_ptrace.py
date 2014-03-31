@@ -14,3 +14,13 @@ PTRACE_PEEKUSR = 3
 
 libc = ctypes.CDLL('libc.so.6', use_errno=True)
 ptrace = libc.ptrace
+
+
+class ctype_primitive_wrapper(object):
+    def __init__(self, value):
+        self.value = value
+
+    def __getattr__(self, name):
+        if name.startswith("as_"):
+            return getattr(getattr(ctypes, "c_%s" % name[3:])(self.value), "value")
+        return object.__getattribute__(self, name)

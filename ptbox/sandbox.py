@@ -91,7 +91,7 @@ if __name__ == "__main__":
 
     @syscall
     def do_write(pid):
-        fd = arg0(pid)
+        fd = arg0(pid).as_int
         # Only allow writing to stdout & stderr
         print fd,
         return fd == 1 or fd == 2
@@ -110,7 +110,7 @@ if __name__ == "__main__":
     def __do_access(pid):
         global proc_mem
         try:
-            addr = ctypes.c_uint(arg0(pid)).value
+            addr = arg0(pid).as_uint
             print "(%d)" % addr,
             if addr > 0:
                 if not proc_mem:
@@ -143,7 +143,7 @@ if __name__ == "__main__":
 
     @unsafe_syscall
     def do_open(pid):
-        mode = ctypes.c_int(arg2(pid)).value
+        mode = arg2(pid).as_int
         if mode:
             print mode,
             # TODO: kill

@@ -19,7 +19,7 @@ EFL = 14
 UESP = 15
 SS = 16
 
-read_reg = lambda pid, reg: ptrace(PTRACE_PEEKUSR, pid, 4 * reg, None)
+read_reg = lambda pid, reg: ctype_primitive_wrapper(ptrace(PTRACE_PEEKUSR, pid, 4 * reg, None))
 arg0 = lambda pid: read_reg(pid, EBX)
 arg1 = lambda pid: read_reg(pid, ECX)
 arg2 = lambda pid: read_reg(pid, EDX)
