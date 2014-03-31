@@ -52,79 +52,106 @@ class nix_Process(object):
         return self._get_usages()[1]
 
 
-def __spawn_execute(args, proxied_syscalls, time, memory):
-    child = args[0]
-    child_args = args
+class SecurePopen(object):
+    def __init__(self, args, handlers, time, memory):
+        self.args = args
+        self.handlers = handlers
+        self.time = time
+        self.memory = memory
+        self.returncode = None
 
-    rusage = None
-    status = None
+        self._stdin_, self._stdin   = os.pipe()
+        self._stdout, self._stdout_ = os.pipe()
+        self._stderr, self._stderr_ = os.pipe()
+        self.stdin  = os.fdopen(self._stdin,  'w')
+        self.stdout = os.fdopen(self._stdout, 'r')
+        self.stderr = os.fdopen(self._stderr, 'r')
 
-    mem = None
-    pid = os.fork()
-    if not pid:
-        if memory:
-            resource.setrlimit(resource.RLIMIT_AS, (memory * 1024 + 16 * 1024 * 1024,) * 2)
-        ptrace(PTRACE_TRACEME, 0, None, None)
-        # Close all file descriptors that are not standard
-        os.closerange(3, os.sysconf("SC_OPEN_MAX"))
-        os.kill(os.getpid(), SIGSTOP)
-        # Replace current process with the child process
-        # This call does not return
-        os.execvp(child, child_args)
-        # Unless it does, of course, in which case you're screwed
-        # We don't cover this in the warranty
-        # When you reach here, you are screwed
-        # As much as being handed control of a MySQL server without
-        # ANY SQL knowledge or docs. ENJOY.
-        os._exit(3306)
-    else:
-        start = time.time()
-        i = 0
-        in_syscall = False
-        while True:
-            _, status, rusage = os.wait4(pid, 0)
+        self.worker = threading.Thread(target=self.__spawn_execute)
+        self.worker.start()
+    
+    def poll(self):
+        return self.returncode
 
-            if os.WIFEXITED(status):
-                print "Exited"
-                break
+    def __spawn_execute(self):
+        child = self.args[0]
+        child_args = self.args
 
-            if os.WIFSIGNALED(status):
-                break
+        rusage = None
+        status = None
 
-            if os.WSTOPSIG(status) == SIGTRAP:
-                in_syscall = not in_syscall
-                if not in_syscall:
-                    call = get_syscall_number(pid)
+        mem = None
+        pid = os.fork()
+        if not pid:
+            if memory:
+                resource.setrlimit(resource.RLIMIT_AS, (memory * 1024 + 16 * 1024 * 1024,) * 2)
+            os.dup2(self.stdin_, 0)
+            os.dup2(self.stdout_, 1)
+            os.dup2(self.stderr_, 2)
+            ptrace(PTRACE_TRACEME, 0, None, None)
+            # Close all file descriptors that are not standard
+            os.closerange(3, os.sysconf("SC_OPEN_MAX"))
+            os.kill(os.getpid(), SIGSTOP)
+            # Replace current process with the child process
+            # This call does not return
+            os.execvp(child, child_args)
+            # Unless it does, of course, in which case you're screwed
+            # We don't cover this in the warranty
+            # When you reach here, you are screwed
+            # As much as being handed control of a MySQL server without
+            # ANY SQL knowledge or docs. ENJOY.
+            os._exit(3306)
+        else:
+            os.close(self._stdin_)
+            os.close(self._stdout_)
+            os.close(self._stderr_)
+            start = time.time()
+            i = 0
+            in_syscall = False
+            while True:
+                _, status, rusage = os.wait4(pid, 0)
 
-                    print reverse_syscalls[call],
+                if os.WIFEXITED(status):
+                    print "Exited"
+                    break
 
-                    if call in proxied_syscalls:
-                        if not proxied_syscalls[call](pid):
-                            os.kill(pid, SIGKILL)
+                if os.WIFSIGNALED(status):
+                    break
+
+                if os.WSTOPSIG(status) == SIGTRAP:
+                    in_syscall = not in_syscall
+                    if not in_syscall:
+                        call = get_syscall_number(pid)
+
+                        print reverse_syscalls[call],
+
+                        if call in proxied_syscalls:
+                            if not proxied_syscalls[call](pid):
+                                os.kill(pid, SIGKILL)
+                                print
+                                print "You're doing Something Bad"
+                                break
                             print
-                            print "You're doing Something Bad"
-                            break
-                        print
-                        continue
-                    else:
-                        print
-                        raise Exception(call)
+                            continue
+                        else:
+                            print
+                            raise Exception(call)
 
-            ptrace(PTRACE_SYSCALL, pid, None, None)
+                ptrace(PTRACE_SYSCALL, pid, None, None)
 
-        duration = time.time() - start
-        if status is None:  # TLE
-            os.kill(pid, SIGKILL)
-            _, status, rusage = os.wait4(pid, 0)
-            print 'Time Limit Exceeded'
-        print rusage.ru_maxrss, 'KB of RAM'
-        print 'Execution time: %.3f seconds' % duration
-        print 'Return:', os.WEXITSTATUS(status)
+            duration = time.time() - start
+            if status is None:  # TLE
+                os.kill(pid, SIGKILL)
+                _, status, rusage = os.wait4(pid, 0)
+                print 'Time Limit Exceeded'
+            print rusage.ru_maxrss, 'KB of RAM'
+            print 'Execution time: %.3f seconds' % duration
+            print 'Return:', os.WEXITSTATUS(status)
+            self.returncode = os.WEXITSTATUS(status)
 
 
 def execute1(args, handlers, time=None, memory=None):
-    ping_thread = threading.Thread(target=__spawn_execute, args=(args, handlers, time, memory))
-    ping_thread.start()
+    return SecurePopen(args, handlers, time, memory)
 
 
 def execute(args, time=None, memory=None, filesystem=None):
