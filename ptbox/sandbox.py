@@ -83,9 +83,45 @@ if __name__ == "__main__":
     fs_jail = [re.compile(mask) for mask in
                (parsed.filesystem_access.split(':') if parsed.filesystem_access else ['.*'])]
 
-    proc_mem = None
-    do_allow = lambda: True
+    def syscall(func):
+        def delegate():
+            if func():
+                ptrace(PTRACE_SYSCALL, pid, None, None)
+                return True
+            return False
+        return delegate
 
+    def unsafe_syscall(func):
+        """
+            ptrace recieves notifications prior to the kernel reading the memory pointed to by the registers.
+            It is theoretically possible to modify a pointer after ptbox finishes validation but
+            before the memory is actually accessed, given a multiprocess task.
+
+            Hence, here we stop all child tasks (SIGSTOP), execute the syscall, then resume all tasks (SIGCONT).
+        """
+        def halter():
+            tasks = map(int, os.listdir("/proc/%d/task" % os.getpid()))
+            tasks.remove(os.getpid())
+            print tasks, os.getpid()
+            if tasks:
+                for task in tasks:
+                    os.kill(task, SIGSTOP)
+            ret = func()
+            if ret:
+                ptrace(PTRACE_SYSCALL, pid, None, None)
+            if tasks:
+                for task in tasks:
+                    os.kill(task, SIGCONT)
+            return ret
+        return halter
+
+    proc_mem = None
+
+    @syscall
+    def do_allow():
+        return True
+
+    @syscall
     def do_write():
         fd = arg0(pid)
         # Only allow writing to stdout & stderr
@@ -95,6 +131,7 @@ if __name__ == "__main__":
 
     execve_count = 0
 
+    @unsafe_syscall
     def do_execve():
         global execve_count
         execve_count += 1
@@ -102,6 +139,7 @@ if __name__ == "__main__":
             return False
         return True
 
+    @unsafe_syscall
     def do_access():
         global proc_mem
         try:
@@ -173,7 +211,7 @@ if __name__ == "__main__":
         sys_getdents:           do_allow,
         sys_lseek:              do_allow,
 
-       # sys_clone:              do_allow,
+        sys_clone:              do_allow,
         sys_exit_group:         do_allow,
     }
     # @formatter:on
@@ -217,7 +255,8 @@ if __name__ == "__main__":
                 break
 
             if os.WSTOPSIG(status) == SIGTRAP:
-                if in_syscall:
+                in_syscall = not in_syscall
+                if not in_syscall:
                     call = get_syscall_number(pid)
 
                     print reverse_syscalls[call],
@@ -228,11 +267,11 @@ if __name__ == "__main__":
                             print
                             print "You're doing Something Bad"
                             break
+                        print
+                        continue
                     else:
                         print
                         raise Exception(call)
-                    print
-                in_syscall = not in_syscall
 
             ptrace(PTRACE_SYSCALL, pid, None, None)
 
