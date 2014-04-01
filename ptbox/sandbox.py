@@ -54,11 +54,15 @@ class nix_Process(object):
 
 class SecurePopen(object):
     def __init__(self, args, handlers, time, memory):
-        self.args = args
-        self.handlers = handlers
-        self.time = time
-        self.memory = memory
-        self.returncode = None
+        self._args = args
+        self._handlers = handlers
+        self._time = time
+        self._memory = memory
+        self._returncode = None
+        self._tle = False
+        self._pid = None
+        self._rusage = None
+        self._duration = None
 
         self._stdin_, self._stdin   = os.pipe()
         self._stdout, self._stdout_ = os.pipe()
@@ -67,23 +71,60 @@ class SecurePopen(object):
         self.stdout = os.fdopen(self._stdout, 'r')
         self.stderr = os.fdopen(self._stderr, 'r')
 
-        self.worker = threading.Thread(target=self.__spawn_execute)
-        self.worker.start()
-    
+        self._started = threading.Event()
+        self._died = threading.Event()
+        self._worker = threading.Thread(target=self.__spawn_execute)
+        self._worker.start()
+        self._shocker = threading.Thread(target=self.__shocker)
+        self._shocker.start()
+
+    @property
+    def returncode(self):
+        return self._returncode
+
+    def wait(self):
+        self._died.wait()
+        return self._returncode
+
     def poll(self):
-        return self.returncode
+        return self._returncode
+
+    @property
+    def max_memory(self):
+        if self._rusage is not None:
+            return self._rusage.ru_maxrss
+
+    @property
+    def execution_time(self):
+        return self._duration
+
+    @property
+    def mle(self):
+        if self._memory is None:
+            return False
+        if self._rusage is not None:
+            return self._rusage.ru_maxrss > self._memory
+    
+    @property
+    def tle(self):
+        return self._tle
+
+    def __shocker(self):
+        self._started.wait()
+        time.sleep(self._time)
+        if self.returncode is None:
+            os.kill(self._pid, SIGKILL)
+            self._tle = True
 
     def __spawn_execute(self):
-        child = self.args[0]
-        child_args = self.args
+        child = self._args[0]
+        child_args = self._args
 
-        rusage = None
         status = None
-
         mem = None
         pid = os.fork()
         if not pid:
-            if memory:
+            if self._memory:
                 resource.setrlimit(resource.RLIMIT_AS, (memory * 1024 + 16 * 1024 * 1024,) * 2)
             os.dup2(self.stdin_, 0)
             os.dup2(self.stdout_, 1)
@@ -105,11 +146,15 @@ class SecurePopen(object):
             os.close(self._stdin_)
             os.close(self._stdout_)
             os.close(self._stderr_)
+
+            self._pid = pid
+            self._started.set()
+
             start = time.time()
             i = 0
             in_syscall = False
             while True:
-                _, status, rusage = os.wait4(pid, 0)
+                _, status, self._rusage = os.wait4(pid, 0)
 
                 if os.WIFEXITED(status):
                     print "Exited"
@@ -139,15 +184,16 @@ class SecurePopen(object):
 
                 ptrace(PTRACE_SYSCALL, pid, None, None)
 
-            duration = time.time() - start
+            self._duration = time.time() - start
             if status is None:  # TLE
                 os.kill(pid, SIGKILL)
-                _, status, rusage = os.wait4(pid, 0)
+                _, status, self._rusage = os.wait4(pid, 0)
                 print 'Time Limit Exceeded'
-            print rusage.ru_maxrss, 'KB of RAM'
-            print 'Execution time: %.3f seconds' % duration
+            print self._rusage.ru_maxrss, 'KB of RAM'
+            print 'Execution time: %.3f seconds' % self._duration
             print 'Return:', os.WEXITSTATUS(status)
             self.returncode = os.WEXITSTATUS(status)
+            self._died.set()
 
 
 def execute1(args, handlers, time=None, memory=None):
