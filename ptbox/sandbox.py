@@ -197,5 +197,9 @@ class SecurePopen(object):
             self._died.set()
 
 
+def debug(args, debugger):
+    return execute(args, debugger)
+
+
 def execute(args, debugger, time=None, memory=None):
     return SecurePopen(args, debugger, time, memory)
