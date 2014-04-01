@@ -46,14 +46,21 @@ class SecurePopen(object):
         self._worker = threading.Thread(target=self.__spawn_execute)
         self._worker.start()
         if time:
+            # Spawn thread to kill process after it times out
             self._shocker = threading.Thread(target=self.__shocker)
             self._shocker.start()
 
     @property
     def returncode(self):
+        """
+            The return code of the process, or None if the process has not exited yet.
+        """
         return self._returncode
 
     def wait(self):
+        """
+            Waits for the process.
+        """
         self._died.wait()
         return self._returncode
 
@@ -62,15 +69,26 @@ class SecurePopen(object):
 
     @property
     def max_memory(self):
+        """
+            The max memory usage of the process, after the exit of the process.
+        """
+        # TODO: this can be done for when process hasn't exited yet
         if self._rusage is not None:
             return self._rusage.ru_maxrss
 
     @property
     def execution_time(self):
+        """
+            The total execution time of the process, after the exit of the process.
+        """
+        # TODO: this can be done for when process hasn't exited yet
         return self._duration
 
     @property
     def mle(self):
+        """
+            Whether or not the process' memory limit was exceeded.
+        """
         if self._memory is None:
             return False
         if self._rusage is not None:
@@ -78,10 +96,16 @@ class SecurePopen(object):
 
     @property
     def tle(self):
+        """
+            Whether or not the process' time limit was exceeded.
+        """
         return self._tle
 
     @property
     def bitness(self):
+        """
+            The bitness of the process; an integer: either 32 or 64.
+        """
         return int(architecture(self._child)[0][:2])
 
     def __shocker(self):
@@ -127,18 +151,22 @@ class SecurePopen(object):
                 gc.enable()
 
             self._debugger.pid = pid
+            # Depending on the bitness, import a different ptrace
+            # Registers change depending on bitness, as do syscall ids
             if self.bitness == 64:
                 import _ptrace64 as _ptrace
             else:
                 import _ptrace32 as _ptrace
+            # Define the shells for reading syscall arguments in the debugger
             self._debugger.arg0 = lambda: _ptrace.arg0(pid)
             self._debugger.arg1 = lambda: _ptrace.arg1(pid)
             self._debugger.arg2 = lambda: _ptrace.arg2(pid)
             self._debugger.arg3 = lambda: _ptrace.arg3(pid)
             self._debugger.arg4 = lambda: _ptrace.arg4(pid)
             self._debugger.arg5 = lambda: _ptrace.arg5(pid)
+            # Utility method for getting syscall number for call
             self._debugger.get_syscall_number = lambda: _ptrace.get_syscall_number(pid)
-
+            # Utility to get printable syscall names by id
             reverse_syscalls = dict((v, k) for k, v in _ptrace.syscalls.iteritems())
             self._debugger.reverse_syscalls = reverse_syscalls
 
@@ -146,6 +174,7 @@ class SecurePopen(object):
             for call, id in _ptrace.syscalls.iteritems():
                 setattr(self._debugger, call, id)
 
+            # Let the debugger define its proxies
             syscall_proxies = self._debugger.get_handlers()
 
             os.close(self._stdin_)
@@ -181,11 +210,13 @@ class SecurePopen(object):
                                 print
                                 print "You're doing Something Bad"
                             print
+                            # The @*syscall decorators resume the syscall
                             continue
                         else:
-                            print syscall_proxies
-                            raise Exception(call)
-
+                            # Our method is not proxied, so is assumed to be disallowed
+                            # TODO: perhaps add option to cancel the syscall instead?
+                            raise AssertionError(call)
+                # Not handled by a decorator: resume syscall
                 ptrace(PTRACE_SYSCALL, pid, None, None)
 
             self._duration = time.time() - start
