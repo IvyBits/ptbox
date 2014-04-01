@@ -64,10 +64,10 @@ class SecurePopen(object):
         self._rusage = None
         self._duration = None
 
-        self._stdin_, self._stdin   = os.pipe()
+        self._stdin_, self._stdin = os.pipe()
         self._stdout, self._stdout_ = os.pipe()
         self._stderr, self._stderr_ = os.pipe()
-        self.stdin  = os.fdopen(self._stdin,  'w')
+        self.stdin = os.fdopen(self._stdin, 'w')
         self.stdout = os.fdopen(self._stdout, 'r')
         self.stderr = os.fdopen(self._stderr, 'r')
 
@@ -75,8 +75,9 @@ class SecurePopen(object):
         self._died = threading.Event()
         self._worker = threading.Thread(target=self.__spawn_execute)
         self._worker.start()
-        self._shocker = threading.Thread(target=self.__shocker)
-        self._shocker.start()
+        if time:
+            self._shocker = threading.Thread(target=self.__shocker)
+            self._shocker.start()
 
     @property
     def returncode(self):
@@ -104,7 +105,7 @@ class SecurePopen(object):
             return False
         if self._rusage is not None:
             return self._rusage.ru_maxrss > self._memory
-    
+
     @property
     def tle(self):
         return self._tle
@@ -121,14 +122,13 @@ class SecurePopen(object):
         child_args = self._args
 
         status = None
-        mem = None
         pid = os.fork()
         if not pid:
             if self._memory:
-                resource.setrlimit(resource.RLIMIT_AS, (memory * 1024 + 16 * 1024 * 1024,) * 2)
-            os.dup2(self.stdin_, 0)
-            os.dup2(self.stdout_, 1)
-            os.dup2(self.stderr_, 2)
+                resource.setrlimit(resource.RLIMIT_AS, (self._memory * 1024 + 16 * 1024 * 1024,) * 2)
+            os.dup2(self._stdin, 0)
+            os.dup2(self._stdout, 1)
+            os.dup2(self._stderr, 2)
             ptrace(PTRACE_TRACEME, 0, None, None)
             # Close all file descriptors that are not standard
             os.closerange(3, os.sysconf("SC_OPEN_MAX"))
@@ -170,8 +170,8 @@ class SecurePopen(object):
 
                         print reverse_syscalls[call],
 
-                        if call in proxied_syscalls:
-                            if not proxied_syscalls[call](pid):
+                        if call in self._handlers:
+                            if not self._handlers[call](pid):
                                 os.kill(pid, SIGKILL)
                                 print
                                 print "You're doing Something Bad"
@@ -192,47 +192,13 @@ class SecurePopen(object):
             print self._rusage.ru_maxrss, 'KB of RAM'
             print 'Execution time: %.3f seconds' % self._duration
             print 'Return:', os.WEXITSTATUS(status)
-            self.returncode = os.WEXITSTATUS(status)
+            self._returncode = os.WEXITSTATUS(status)
             self._died.set()
 
 
-def execute1(args, handlers, time=None, memory=None):
-    return SecurePopen(args, handlers, time, memory)
-
-
 def execute(args, time=None, memory=None, filesystem=None):
-    p_args = [sys.executable, __file__]
-    if time:
-        p_args += ["-t", str(time)]
-    if memory:
-        p_args += ["-m", str(memory)]
-    if filesystem:
-        p_args += ["-fs", ':'.join(filesystem)]
-
-    p_args.append("--")
-    p_args += args
-    process = subprocess.Popen(p_args,
-                               stdin=subprocess.PIPE,
-                               stdout=subprocess.PIPE,
-                               stderr=subprocess.PIPE)
-    return nix_Process(process, memory)
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Runs and monitors a process' usage stats on *nix systems")
-    parser.add_argument("child_args", nargs="+", help="The child process path followed by arguments; relative allowed")
-    parser.add_argument("-t", "--time", type=float, help="Time to limit process to, in seconds")
-    parser.add_argument("-m", "--memory", type=int, help="Memory to limit process to, in kb")
-    parser.add_argument("-fs", "--filesystem-access", help="':'-delimited directory masks; regex allowed")
-    parsed = parser.parse_args()
-
-    child = parsed.child_args[0]
-    child_args = parsed.child_args
-
     fs_jail = [re.compile(mask) for mask in
-               (parsed.filesystem_access.split(':') if parsed.filesystem_access else ['.*'])]
-
-    proc_mem = None
+               (filesystem if filesystem else ['.*'])]
 
     @syscall
     def do_allow(pid):
@@ -246,24 +212,22 @@ if __name__ == "__main__":
         return fd == 1 or fd == 2
 
 
-    execve_count = 0
+    execve_count = [0]
 
     @unsafe_syscall
     def do_execve(pid):
-        global execve_count
-        execve_count += 1
-        if execve_count > 2:
+        execve_count[0] += 1
+        if execve_count[0] > 2:
             return False
         return True
 
     def __do_access(pid):
-        global proc_mem
         try:
             addr = arg0(pid).as_uint
             print "(%d)" % addr,
             if addr > 0:
-                if not proc_mem:
-                    proc_mem = open("/proc/%d/mem" % pid, "rb")
+                proc_mem = open("/proc/%d/mem" % pid, "rb")
+
                 proc_mem.seek(addr, 0)
                 buf = ''
                 page = (addr + 4096) // 4096 * 4096 - addr
@@ -298,110 +262,40 @@ if __name__ == "__main__":
             # TODO: kill
         return __do_access(pid)
 
-    # @formatter:off
     proxied_syscalls = {
-        sys_execve:             do_execve,
-        sys_read:               do_allow,
-        sys_write:              do_write,
-        sys_open:               do_open,
-        sys_access:             do_access,
-        sys_close:              do_allow,
-        sys_stat:               do_allow,
-        sys_fstat:              do_allow,
-        sys_mmap:               do_allow,
-        sys_mprotect:           do_allow,
-        sys_munmap:             do_allow,
-        sys_brk:                do_allow,
-        sys_fcntl:              do_allow,
-        sys_arch_prctl:         do_allow,
-        sys_set_tid_address:    do_allow,
-        sys_set_robust_list:    do_allow,
-        sys_futex:              do_allow,
-        sys_rt_sigaction:       do_allow,
-        sys_rt_sigprocmask:     do_allow,
-        sys_getrlimit:          do_allow,
-        sys_ioctl:              do_allow,
-        sys_readlink:           do_allow,
-        sys_getcwd:             do_allow,
-        sys_geteuid:            do_allow,
-        sys_getuid:             do_allow,
-        sys_getegid:            do_allow,
-        sys_getgid:             do_allow,
-        sys_lstat:              do_allow,
-        sys_openat:             do_allow,
-        sys_getdents:           do_allow,
-        sys_lseek:              do_allow,
+        sys_execve: do_execve,
+        sys_read: do_allow,
+        sys_write: do_write,
+        sys_open: do_open,
+        sys_access: do_access,
+        sys_close: do_allow,
+        sys_stat: do_allow,
+        sys_fstat: do_allow,
+        sys_mmap: do_allow,
+        sys_mprotect: do_allow,
+        sys_munmap: do_allow,
+        sys_brk: do_allow,
+        sys_fcntl: do_allow,
+        sys_arch_prctl: do_allow,
+        sys_set_tid_address: do_allow,
+        sys_set_robust_list: do_allow,
+        sys_futex: do_allow,
+        sys_rt_sigaction: do_allow,
+        sys_rt_sigprocmask: do_allow,
+        sys_getrlimit: do_allow,
+        sys_ioctl: do_allow,
+        sys_readlink: do_allow,
+        sys_getcwd: do_allow,
+        sys_geteuid: do_allow,
+        sys_getuid: do_allow,
+        sys_getegid: do_allow,
+        sys_getgid: do_allow,
+        sys_lstat: do_allow,
+        sys_openat: do_allow,
+        sys_getdents: do_allow,
+        sys_lseek: do_allow,
 
-        sys_clone:              do_allow,
-        sys_exit_group:         do_allow,
+        sys_clone: do_allow,
+        sys_exit_group: do_allow,
     }
-    # @formatter:on
-
-    rusage = None
-    status = None
-
-    mem = None
-    pid = os.fork()
-    if not pid:
-        if parsed.memory:
-            resource.setrlimit(resource.RLIMIT_AS, (32 * 1024 * 1024,) * 2)
-        ptrace(PTRACE_TRACEME, 0, None, None)
-        # Merge the stderr (2) into stdout (1) so that the execute
-        # may be able to return usage stats through stderr
-        os.dup2(1, 2)
-        # Close all file descriptors that are not standard
-        os.closerange(3, os.sysconf("SC_OPEN_MAX"))
-        os.kill(os.getpid(), SIGSTOP)
-        # Replace current process with the child process
-        # This call does not return
-        os.execvp(child, child_args)
-        # Unless it does, of course, in which case you're screwed
-        # We don't cover this in the warranty
-        #  When you reach here, you are screwed
-        # As much as being handed control of a MySQL server without
-        # ANY SQL knowledge or docs. ENJOY.
-        os._exit(3306)
-    else:
-        start = time.time()
-        i = 0
-        in_syscall = False
-        while True:
-            _, status, rusage = os.wait4(pid, 0)
-
-            if os.WIFEXITED(status):
-                print "Exited"
-                break
-
-            if os.WIFSIGNALED(status):
-                break
-
-            if os.WSTOPSIG(status) == SIGTRAP:
-                in_syscall = not in_syscall
-                if not in_syscall:
-                    call = get_syscall_number(pid)
-
-                    print reverse_syscalls[call],
-
-                    if call in proxied_syscalls:
-                        if not proxied_syscalls[call](pid):
-                            os.kill(pid, SIGKILL)
-                            print
-                            print "You're doing Something Bad"
-                            break
-                        print
-                        continue
-                    else:
-                        print
-                        raise Exception(call)
-
-            ptrace(PTRACE_SYSCALL, pid, None, None)
-
-        duration = time.time() - start
-        if status is None:  # TLE
-            os.kill(pid, SIGKILL)
-            _, status, rusage = os.wait4(pid, 0)
-            print 'Time Limit Exceeded'
-        print rusage.ru_maxrss, 'KB of RAM'
-        print 'Execution time: %.3f seconds' % duration
-        print 'Return:', os.WEXITSTATUS(status)
-
+    return SecurePopen(args, proxied_syscalls, time, memory)

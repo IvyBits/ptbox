@@ -36,13 +36,13 @@ def unsafe_syscall(func):
         tasks = map(int, os.listdir("/proc/%d/task" % os.getpid()))
         tasks.remove(os.getpid())
         print tasks, os.getpid()
-        if tasks:
+        if 0 and tasks:
             for task in tasks:
                 os.kill(task, SIGSTOP)
         ret = func(pid, *args, **kwargs)
         if ret:
             ptrace(PTRACE_SYSCALL, pid, None, None)
-        if tasks:
+        if 0 and tasks:
             for task in tasks:
                 os.kill(task, SIGCONT)
         return ret
