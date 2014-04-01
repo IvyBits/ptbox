@@ -144,7 +144,6 @@ class SecurePopen(object):
                                 os.kill(pid, SIGKILL)
                                 print
                                 print "You're doing Something Bad"
-                                break
                             print
                             continue
                         else:
@@ -153,14 +152,11 @@ class SecurePopen(object):
                 ptrace(PTRACE_SYSCALL, pid, None, None)
 
             self._duration = time.time() - start
-            if status is None:  # TLE
-                os.kill(pid, SIGKILL)
-                _, status, self._rusage = os.wait4(pid, 0)
-                print 'Time Limit Exceeded'
+            ret = os.WEXITSTATUS(status) if os.WIFEXITED(status) else -os.WTERMSIG(status)
             print self._rusage.ru_maxrss, 'KB of RAM'
             print 'Execution time: %.3f seconds' % self._duration
-            print 'Return:', os.WEXITSTATUS(status)
-            self._returncode = os.WEXITSTATUS(status)
+            print 'Return:', ret
+            self._returncode = ret
             self._died.set()
 
 
@@ -191,21 +187,25 @@ def execute(args, time=None, memory=None, filesystem=None):
 
     def __do_access(pid):
         try:
-            addr = arg0(pid).as_uint
+            addr = arg0(pid).as_uint64
             print "(%d)" % addr,
             if addr > 0:
-                proc_mem = open("/proc/%d/mem" % pid, "rb")
+                #proc_mem = open("/proc/%d/mem" % pid, "rb")
 
-                proc_mem.seek(addr, 0)
+                #proc_mem.seek(addr, 0)
+                proc_mem = os.open('/proc/%d/mem' % pid, os.O_RDONLY)
+                os.lseek(proc_mem, addr, os.SEEK_SET)
                 buf = ''
                 page = (addr + 4096) // 4096 * 4096 - addr
                 while True:
-                    buf += proc_mem.read(page)
+                    #buf += proc_mem.read(page)
+                    buf += os.read(proc_mem, page)
                     if '\0' in buf:
                         buf = buf[:buf.index('\0')]
                         break
                     page = 4096
                 print buf,
+                os.close(proc_mem)
                 for mask in fs_jail:
                     if mask.match(buf):
                         break
