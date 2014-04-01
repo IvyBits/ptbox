@@ -174,10 +174,6 @@ class SecurePopen(object):
             get_syscall_number = lambda: wrapped_ids[_ptrace.get_syscall_number(pid)]
             self._debugger.get_syscall_number = get_syscall_number
 
-            # Utility to get printable syscall names by id
-            reverse_syscalls = dict((v, k) for k, v in syscalls.by_name.iteritems())
-            self._debugger.reverse_syscalls = reverse_syscalls
-
             # Let the debugger define its proxies
             syscall_proxies = self._debugger.get_handlers()
 
@@ -206,7 +202,7 @@ class SecurePopen(object):
                     if not in_syscall:
                         call = get_syscall_number()
 
-                        print "%d (%s)" % (call, reverse_syscalls[call]),
+                        print "%d (%s)" % (call, syscalls.by_id[call]),
 
                         if call in syscall_proxies:
                             if not syscall_proxies[call]():
@@ -219,7 +215,7 @@ class SecurePopen(object):
                         else:
                             # Our method is not proxied, so is assumed to be disallowed
                             # TODO: perhaps add option to cancel the syscall instead?
-                            raise AssertionError("%d (%s)" % (call, reverse_syscalls[call]))
+                            raise AssertionError("%d (%s)" % (call, syscalls.by_id[call]))
                 # Not handled by a decorator: resume syscall
                 ptrace(PTRACE_SYSCALL, pid, None, None)
 

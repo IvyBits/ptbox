@@ -66,6 +66,7 @@ __all__ = ['sys_mbind', 'sys_nfsservctl', 'sys_getresuid', 'sys_clone', 'sys_lis
 ]
 
 by_name = {}
+by_id = __all__
 
 # Now we generate the syscall dict!
 for id, call in enumerate(__all__):
