@@ -8,6 +8,7 @@ from platform import architecture
 
 from ._ptrace import *
 from ptbox import syscalls
+from ptbox.syscalls import by_name
 
 
 def _find_exe(path):
@@ -166,9 +167,11 @@ class SecurePopen(object):
             self._debugger.arg3 = lambda: _ptrace.arg3(pid)
             self._debugger.arg4 = lambda: _ptrace.arg4(pid)
             self._debugger.arg5 = lambda: _ptrace.arg5(pid)
+            # Reverse syscall ids
+            wrapped_ids = dict((x[bitness == 64], k) for k, x in syscalls.translator.iteritems())
 
             # Utility method for getting syscall number for call
-            get_syscall_number = lambda: syscalls.translator[_ptrace.get_syscall_number(pid)][bitness == 64]
+            get_syscall_number = lambda: wrapped_ids[_ptrace.get_syscall_number(pid)]
             self._debugger.get_syscall_number = get_syscall_number
 
             # Utility to get printable syscall names by id
@@ -202,6 +205,7 @@ class SecurePopen(object):
                     in_syscall = not in_syscall
                     if not in_syscall:
                         call = get_syscall_number()
+
                         print "%d (%s)" % (call, reverse_syscalls[call]),
 
                         if call in syscall_proxies:
@@ -215,8 +219,7 @@ class SecurePopen(object):
                         else:
                             # Our method is not proxied, so is assumed to be disallowed
                             # TODO: perhaps add option to cancel the syscall instead?
-                            print
-                            #raise AssertionError("%d (%s)" % (call, reverse_syscalls[call]))
+                            raise AssertionError("%d (%s)" % (call, reverse_syscalls[call]))
                 # Not handled by a decorator: resume syscall
                 ptrace(PTRACE_SYSCALL, pid, None, None)
 

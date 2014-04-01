@@ -1,9 +1,6 @@
 import os
 import re
-from signal import *
-from _ptrace import *
 from __init__ import *
-from ptbox import syscalls
 from syscalls import *
 
 
@@ -15,7 +12,6 @@ class CHROOTProcessDebugger(ProcessDebugger):
 
     def get_handlers(self):
         do_allow = self.do_allow
-        print ">>>>>>>>>", syscalls.by_name['sys_execve'], sys_execve
         return {
             sys_execve: self.do_execve,
             sys_read: do_allow,
