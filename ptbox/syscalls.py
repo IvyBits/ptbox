@@ -1,5 +1,3 @@
-import sys
-
 __all__ = ['sys_mbind', 'sys_nfsservctl', 'sys_getresuid', 'sys_clone', 'sys_listxattr', 'sys_mq_notify',
            'sys_settimeofday', 'sys_timer_gettime', 'sys_capget', 'sys_setxattr', 'sys_mq_open', 'sys_getpmsg',
            'sys_open', 'sys_eventfd2', 'sys_ioctl', 'sys_geteuid32', 'sys_pipe', 'sys_reboot', 'sys_setrlimit',
@@ -69,8 +67,8 @@ by_name = {}
 by_id = __all__
 
 # Now we generate the syscall dict!
-for id, call in enumerate(__all__):
-    by_name[call] = id
+for call_id, call_name in enumerate(__all__):
+    by_name[call_name] = call_id
 
 # And copy to actually define the variables
 vars().update(by_name)
