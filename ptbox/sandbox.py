@@ -7,6 +7,7 @@ import threading
 from platform import architecture
 
 from ._ptrace import *
+from ptbox import syscalls
 
 
 def _find_exe(path):
@@ -153,7 +154,8 @@ class SecurePopen(object):
             self._debugger.pid = pid
             # Depending on the bitness, import a different ptrace
             # Registers change depending on bitness, as do syscall ids
-            if self.bitness == 64:
+            bitness = self.bitness
+            if bitness == 64:
                 import _ptrace64 as _ptrace
             else:
                 import _ptrace32 as _ptrace
@@ -164,15 +166,14 @@ class SecurePopen(object):
             self._debugger.arg3 = lambda: _ptrace.arg3(pid)
             self._debugger.arg4 = lambda: _ptrace.arg4(pid)
             self._debugger.arg5 = lambda: _ptrace.arg5(pid)
-            # Utility method for getting syscall number for call
-            self._debugger.get_syscall_number = lambda: _ptrace.get_syscall_number(pid)
-            # Utility to get printable syscall names by id
-            reverse_syscalls = dict((v, k) for k, v in _ptrace.syscalls.iteritems())
-            self._debugger.reverse_syscalls = reverse_syscalls
 
-            # Define all syscalls as variables
-            for call, id in _ptrace.syscalls.iteritems():
-                setattr(self._debugger, call, id)
+            # Utility method for getting syscall number for call
+            get_syscall_number = lambda: syscalls.translator[_ptrace.get_syscall_number(pid)][bitness == 64]
+            self._debugger.get_syscall_number = get_syscall_number
+
+            # Utility to get printable syscall names by id
+            reverse_syscalls = dict((v, k) for k, v in syscalls.by_name.iteritems())
+            self._debugger.reverse_syscalls = reverse_syscalls
 
             # Let the debugger define its proxies
             syscall_proxies = self._debugger.get_handlers()
@@ -200,9 +201,8 @@ class SecurePopen(object):
                 if os.WSTOPSIG(status) == SIGTRAP:
                     in_syscall = not in_syscall
                     if not in_syscall:
-                        call = _ptrace.get_syscall_number(pid)
-
-                        print reverse_syscalls[call],
+                        call = get_syscall_number()
+                        print "%d (%s)" % (call, reverse_syscalls[call]),
 
                         if call in syscall_proxies:
                             if not syscall_proxies[call]():
@@ -215,7 +215,8 @@ class SecurePopen(object):
                         else:
                             # Our method is not proxied, so is assumed to be disallowed
                             # TODO: perhaps add option to cancel the syscall instead?
-                            raise AssertionError(call)
+                            print
+                            #raise AssertionError("%d (%s)" % (call, reverse_syscalls[call]))
                 # Not handled by a decorator: resume syscall
                 ptrace(PTRACE_SYSCALL, pid, None, None)
 

@@ -3,6 +3,8 @@ import re
 from signal import *
 from _ptrace import *
 from __init__ import *
+from ptbox import syscalls
+from syscalls import *
 
 
 class CHROOTProcessDebugger(ProcessDebugger):
@@ -12,41 +14,43 @@ class CHROOTProcessDebugger(ProcessDebugger):
         self.execve_count = 0
 
     def get_handlers(self):
+        do_allow = self.do_allow
+        print ">>>>>>>>>", syscalls.by_name['sys_execve'], sys_execve
         return {
-            self.sys_execve: self.do_execve,
-            self.sys_read: self.do_allow,
-            self.sys_write: self.do_write,
-            self.sys_open: self.do_open,
-            self.sys_access: self.do_access,
-            self.sys_close: self.do_allow,
-            self.sys_stat: self.do_allow,
-            self.sys_fstat: self.do_allow,
-            self.sys_mmap: self.do_allow,
-            self.sys_mprotect: self.do_allow,
-            self.sys_munmap: self.do_allow,
-            self.sys_brk: self.do_allow,
-            self.sys_fcntl: self.do_allow,
-            self.sys_arch_prctl: self.do_allow,
-            self.sys_set_tid_address: self.do_allow,
-            self.sys_set_robust_list: self.do_allow,
-            self.sys_futex: self.do_allow,
-            self.sys_rt_sigaction: self.do_allow,
-            self.sys_rt_sigprocmask: self.do_allow,
-            self.sys_getrlimit: self.do_allow,
-            self.sys_ioctl: self.do_allow,
-            self.sys_readlink: self.do_allow,
-            self.sys_getcwd: self.do_allow,
-            self.sys_geteuid: self.do_allow,
-            self.sys_getuid: self.do_allow,
-            self.sys_getegid: self.do_allow,
-            self.sys_getgid: self.do_allow,
-            self.sys_lstat: self.do_allow,
-            self.sys_openat: self.do_allow,
-            self.sys_getdents: self.do_allow,
-            self.sys_lseek: self.do_allow,
+            sys_execve: self.do_execve,
+            sys_read: do_allow,
+            sys_write: self.do_write,
+            sys_open: self.do_open,
+            sys_access: self.do_access,
+            sys_close: do_allow,
+            sys_stat: do_allow,
+            sys_fstat: do_allow,
+            sys_mmap: do_allow,
+            sys_mprotect: do_allow,
+            sys_munmap: do_allow,
+            sys_brk: do_allow,
+            sys_fcntl: do_allow,
+            sys_arch_prctl: do_allow,
+            sys_set_tid_address: do_allow,
+            sys_set_robust_list: do_allow,
+            sys_futex: do_allow,
+            sys_rt_sigaction: do_allow,
+            sys_rt_sigprocmask: do_allow,
+            sys_getrlimit: do_allow,
+            sys_ioctl: do_allow,
+            sys_readlink: do_allow,
+            sys_getcwd: do_allow,
+            sys_geteuid: do_allow,
+            sys_getuid: do_allow,
+            sys_getegid: do_allow,
+            sys_getgid: do_allow,
+            sys_lstat: do_allow,
+            sys_openat: do_allow,
+            sys_getdents: do_allow,
+            sys_lseek: do_allow,
 
-            self.sys_clone: self.do_allow,
-            self.sys_exit_group: self.do_allow,
+            sys_clone: do_allow,
+            sys_exit_group: do_allow,
         }
 
     @syscall
