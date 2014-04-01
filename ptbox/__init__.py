@@ -35,7 +35,6 @@ def unsafe_syscall(func):
     def halter(pid, *args, **kwargs):
         tasks = map(int, os.listdir("/proc/%d/task" % os.getpid()))
         tasks.remove(os.getpid())
-        print tasks, os.getpid()
         if 0 and tasks:
             for task in tasks:
                 os.kill(task, SIGSTOP)

@@ -5,51 +5,10 @@ import time
 import resource
 import argparse
 import re
+import gc
 from signal import *
 from ptbox import *
 import threading
-
-
-class nix_Process(object):
-    def __init__(self, chained, memory_limit):
-        self._chained = chained
-        self.stdout = chained.stdout
-        self.stdin = chained.stdin
-        self.usages = None
-        self.returncode = None
-        self.memory_limit = memory_limit
-
-    def __getattr__(self, name):
-        if name in ["wait", "send_signal", "terminate", "kill"]:
-            return getattr(self._chained, name)
-        return object.__getattribute__(self, name)
-
-    def poll(self):
-        a = self._chained.poll()
-        if a is not None:
-            self.returncode = self._get_usages()[-1]
-            return self.returncode
-        return None
-
-    def _get_usages(self):
-        """
-            Returns an array containing [bool tle, int max memory usage (kb), int runtime, int error code]
-        """
-        if not self.usages:
-            self.usages = map(eval, self._chained.stderr.readline().split())
-        return self.usages
-
-    def get_tle(self):
-        return self._get_usages()[0]
-
-    def get_mle(self):
-        return self._get_usages()[1] > self.memory_limit
-
-    def get_execution_time(self):
-        return self._get_usages()[2]
-
-    def get_max_memory(self):
-        return self._get_usages()[1]
 
 
 class SecurePopen(object):
@@ -122,13 +81,20 @@ class SecurePopen(object):
         child_args = self._args
 
         status = None
-        pid = os.fork()
+        gc_enabled = gc.isenabled()
+        try:
+            gc.disable()
+            pid = os.fork()
+        except:
+            if gc_enabled:
+                gc.enable()
+            raise
         if not pid:
             if self._memory:
                 resource.setrlimit(resource.RLIMIT_AS, (self._memory * 1024 + 16 * 1024 * 1024,) * 2)
-            os.dup2(self._stdin, 0)
-            os.dup2(self._stdout, 1)
-            os.dup2(self._stderr, 2)
+            os.dup2(self._stdin_, 0)
+            os.dup2(self._stdout_, 1)
+            os.dup2(self._stderr_, 2)
             ptrace(PTRACE_TRACEME, 0, None, None)
             # Close all file descriptors that are not standard
             os.closerange(3, os.sysconf("SC_OPEN_MAX"))
@@ -143,6 +109,9 @@ class SecurePopen(object):
             # ANY SQL knowledge or docs. ENJOY.
             os._exit(3306)
         else:
+            if gc_enabled:
+                gc.enable()
+
             os.close(self._stdin_)
             os.close(self._stdout_)
             os.close(self._stderr_)
@@ -179,7 +148,6 @@ class SecurePopen(object):
                             print
                             continue
                         else:
-                            print
                             raise Exception(call)
 
                 ptrace(PTRACE_SYSCALL, pid, None, None)
