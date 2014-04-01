@@ -1,14 +1,28 @@
 import os
-import subprocess
-import sys
 import time
 import resource
-import argparse
-import re
 import gc
 from signal import *
-from ptbox import *
 import threading
+from platform import architecture
+
+from ._ptrace import *
+
+
+def find_exe(path):
+    if os.path.isabs(path):
+        return path
+    if os.sep in path:
+        return os.path.abspath(path)
+    for dir in os.environ.get('PATH', os.defpath).split(os.pathsep):
+        p = os.path.join(dir, path)
+        if os.access(p, os.X_OK):
+            return p
+    raise OSError()
+
+
+def get_bitness(path):
+    return architecture(path)[0]
 
 
 class SecurePopen(object):
@@ -77,7 +91,7 @@ class SecurePopen(object):
             self._tle = True
 
     def __spawn_execute(self):
-        child = self._args[0]
+        child = find_exe(self._args[0])
         child_args = self._args
 
         status = None
@@ -101,7 +115,7 @@ class SecurePopen(object):
             os.kill(os.getpid(), SIGSTOP)
             # Replace current process with the child process
             # This call does not return
-            os.execvp(child, child_args)
+            os.execv(child, child_args)
             # Unless it does, of course, in which case you're screwed
             # We don't cover this in the warranty
             # When you reach here, you are screwed
@@ -113,7 +127,7 @@ class SecurePopen(object):
                 gc.enable()
 
             self._debugger.pid = pid
-            if True:  # TODO: some magic
+            if get_bitness(child):
                 import _ptrace64 as _ptrace
             else:
                 import _ptrace32 as _ptrace
