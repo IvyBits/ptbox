@@ -33,15 +33,15 @@ def unsafe_syscall(func):
     """
 
     def halter(pid, *args, **kwargs):
-        tasks = map(int, os.listdir("/proc/%d/task" % os.getpid()))
-        tasks.remove(os.getpid())
-        if 0 and tasks:
+        tasks = map(int, os.listdir("/proc/%d/task" % pid))
+        tasks.remove(pid)
+        if tasks:
             for task in tasks:
                 os.kill(task, SIGSTOP)
         ret = func(pid, *args, **kwargs)
         if ret:
             ptrace(PTRACE_SYSCALL, pid, None, None)
-        if 0 and tasks:
+        if tasks:
             for task in tasks:
                 os.kill(task, SIGCONT)
         return ret

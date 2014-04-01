@@ -224,10 +224,8 @@ def execute(args, time=None, memory=None, filesystem=None):
 
     @unsafe_syscall
     def do_open(pid):
-        mode = arg2(pid).as_int
-        if mode:
-            print mode,
-            # TODO: kill
+        flags = arg1(pid).as_int
+        print flags, oct(arg2(pid).as_uint)
         return __do_access(pid)
 
     proxied_syscalls = {
