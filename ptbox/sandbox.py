@@ -191,7 +191,6 @@ class SecurePopen(object):
                 _, status, self._rusage = os.wait4(pid, 0)
 
                 if os.WIFEXITED(status):
-                    print "Exited"
                     break
 
                 if os.WIFSIGNALED(status):
@@ -202,14 +201,9 @@ class SecurePopen(object):
                     if not in_syscall:
                         call = get_syscall_number()
 
-                        print "%d (%s)" % (call, syscalls.by_id[call]),
-
                         if call in syscall_proxies:
                             if not syscall_proxies[call]():
                                 os.kill(pid, SIGKILL)
-                                print
-                                print "You're doing Something Bad"
-                            print
                             # The @*syscall decorators resume the syscall
                             continue
                         else:
@@ -221,9 +215,6 @@ class SecurePopen(object):
 
             self._duration = time.time() - start
             ret = os.WEXITSTATUS(status) if os.WIFEXITED(status) else -os.WTERMSIG(status)
-            print self._rusage.ru_maxrss, 'KB of RAM'
-            print 'Execution time: %.3f seconds' % self._duration
-            print 'Return:', ret
             self._returncode = ret
             self._died.set()
 

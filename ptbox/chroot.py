@@ -57,7 +57,6 @@ class CHROOTProcessDebugger(ProcessDebugger):
     def do_write(self):
         fd = self.arg0().as_int
         # Only allow writing to stdout & stderr
-        print fd,
         return fd == 1 or fd == 2
 
 
@@ -71,10 +70,8 @@ class CHROOTProcessDebugger(ProcessDebugger):
     def __do_access(self):
         try:
             addr = self.arg0().as_uint64
-            print "(%d)" % addr,
             if addr > 0:
                 #proc_mem = open("/proc/%d/mem" % pid, "rb")
-
                 #proc_mem.seek(addr, 0)
                 proc_mem = os.open('/proc/%d/mem' % self.pid, os.O_RDONLY)
                 os.lseek(proc_mem, addr, os.SEEK_SET)
@@ -87,7 +84,6 @@ class CHROOTProcessDebugger(ProcessDebugger):
                         buf = buf[:buf.index('\0')]
                         break
                     page = 4096
-                print buf,
                 os.close(proc_mem)
                 for mask in self.fs_jail:
                     if mask.match(buf):
@@ -96,9 +92,7 @@ class CHROOTProcessDebugger(ProcessDebugger):
                     return False
 
         except:
-            import traceback
-
-            traceback.print_exc()
+            pass
         return True
 
     @unsafe_syscall
@@ -108,5 +102,5 @@ class CHROOTProcessDebugger(ProcessDebugger):
     @unsafe_syscall
     def do_open(self):
         flags = self.arg1().as_int
-        print flags, oct(self.arg2().as_uint)
+        # TODO: kill if write
         return self.__do_access()
