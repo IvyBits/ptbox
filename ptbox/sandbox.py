@@ -12,9 +12,9 @@ import threading
 
 
 class SecurePopen(object):
-    def __init__(self, args, handlers, time, memory):
+    def __init__(self, args, debugger, time, memory):
         self._args = args
-        self._handlers = handlers
+        self._debugger = debugger
         self._time = time
         self._memory = memory
         self._returncode = None
@@ -112,6 +112,28 @@ class SecurePopen(object):
             if gc_enabled:
                 gc.enable()
 
+            self._debugger.pid = pid
+            if True:  # TODO: some magic
+                import _ptrace64 as _ptrace
+            else:
+                import _ptrace32 as _ptrace
+            self._debugger.arg0 = lambda: _ptrace.arg0(pid)
+            self._debugger.arg1 = lambda: _ptrace.arg1(pid)
+            self._debugger.arg2 = lambda: _ptrace.arg2(pid)
+            self._debugger.arg3 = lambda: _ptrace.arg3(pid)
+            self._debugger.arg4 = lambda: _ptrace.arg4(pid)
+            self._debugger.arg5 = lambda: _ptrace.arg5(pid)
+            self._debugger.get_syscall_number = lambda: _ptrace.get_syscall_number(pid)
+
+            reverse_syscalls = dict((v, k) for k, v in _ptrace.syscalls.iteritems())
+            self._debugger.reverse_syscalls = reverse_syscalls
+
+            # Define all syscalls as variables
+            for call, id in _ptrace.syscalls.iteritems():
+                setattr(self._debugger, call, id)
+
+            syscall_proxies = self._debugger.get_handlers()
+
             os.close(self._stdin_)
             os.close(self._stdout_)
             os.close(self._stderr_)
@@ -135,18 +157,19 @@ class SecurePopen(object):
                 if os.WSTOPSIG(status) == SIGTRAP:
                     in_syscall = not in_syscall
                     if not in_syscall:
-                        call = get_syscall_number(pid)
+                        call = _ptrace.get_syscall_number(pid)
 
                         print reverse_syscalls[call],
 
-                        if call in self._handlers:
-                            if not self._handlers[call](pid):
+                        if call in syscall_proxies:
+                            if not syscall_proxies[call]():
                                 os.kill(pid, SIGKILL)
                                 print
                                 print "You're doing Something Bad"
                             print
                             continue
                         else:
+                            print syscall_proxies
                             raise Exception(call)
 
                 ptrace(PTRACE_SYSCALL, pid, None, None)
@@ -160,108 +183,5 @@ class SecurePopen(object):
             self._died.set()
 
 
-def execute(args, time=None, memory=None, filesystem=None):
-    fs_jail = [re.compile(mask) for mask in
-               (filesystem if filesystem else ['.*'])]
-
-    @syscall
-    def do_allow(pid):
-        return True
-
-    @syscall
-    def do_write(pid):
-        fd = arg0(pid).as_int
-        # Only allow writing to stdout & stderr
-        print fd,
-        return fd == 1 or fd == 2
-
-
-    execve_count = [0]
-
-    @unsafe_syscall
-    def do_execve(pid):
-        execve_count[0] += 1
-        if execve_count[0] > 2:
-            return False
-        return True
-
-    def __do_access(pid):
-        try:
-            addr = arg0(pid).as_uint64
-            print "(%d)" % addr,
-            if addr > 0:
-                #proc_mem = open("/proc/%d/mem" % pid, "rb")
-
-                #proc_mem.seek(addr, 0)
-                proc_mem = os.open('/proc/%d/mem' % pid, os.O_RDONLY)
-                os.lseek(proc_mem, addr, os.SEEK_SET)
-                buf = ''
-                page = (addr + 4096) // 4096 * 4096 - addr
-                while True:
-                    #buf += proc_mem.read(page)
-                    buf += os.read(proc_mem, page)
-                    if '\0' in buf:
-                        buf = buf[:buf.index('\0')]
-                        break
-                    page = 4096
-                print buf,
-                os.close(proc_mem)
-                for mask in fs_jail:
-                    if mask.match(buf):
-                        break
-                else:
-                    return False
-
-        except:
-            import traceback
-
-            traceback.print_exc()
-        return True
-
-    @unsafe_syscall
-    def do_access(pid):
-        return __do_access(pid)
-
-    @unsafe_syscall
-    def do_open(pid):
-        flags = arg1(pid).as_int
-        print flags, oct(arg2(pid).as_uint)
-        return __do_access(pid)
-
-    proxied_syscalls = {
-        sys_execve: do_execve,
-        sys_read: do_allow,
-        sys_write: do_write,
-        sys_open: do_open,
-        sys_access: do_access,
-        sys_close: do_allow,
-        sys_stat: do_allow,
-        sys_fstat: do_allow,
-        sys_mmap: do_allow,
-        sys_mprotect: do_allow,
-        sys_munmap: do_allow,
-        sys_brk: do_allow,
-        sys_fcntl: do_allow,
-        sys_arch_prctl: do_allow,
-        sys_set_tid_address: do_allow,
-        sys_set_robust_list: do_allow,
-        sys_futex: do_allow,
-        sys_rt_sigaction: do_allow,
-        sys_rt_sigprocmask: do_allow,
-        sys_getrlimit: do_allow,
-        sys_ioctl: do_allow,
-        sys_readlink: do_allow,
-        sys_getcwd: do_allow,
-        sys_geteuid: do_allow,
-        sys_getuid: do_allow,
-        sys_getegid: do_allow,
-        sys_getgid: do_allow,
-        sys_lstat: do_allow,
-        sys_openat: do_allow,
-        sys_getdents: do_allow,
-        sys_lseek: do_allow,
-
-        sys_clone: do_allow,
-        sys_exit_group: do_allow,
-    }
-    return SecurePopen(args, proxied_syscalls, time, memory)
+def execute(args, debugger, time=None, memory=None):
+    return SecurePopen(args, debugger, time, memory)

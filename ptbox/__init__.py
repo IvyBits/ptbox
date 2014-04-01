@@ -1,25 +1,37 @@
 import os
+import re
 from signal import *
+from _ptrace import *
 
-if True:
-    from ._ptrace64 import *
-else:
-    from ._ptrace32 import *
 
-reverse_syscalls = dict((v, k) for k, v in syscalls.iteritems())
+class ProcessDebugger(object):
+    def __init__(self):
+        def undefined_method():
+            raise NotImplementedError("you can only access arguments once a process has been attached")
 
-# Define all syscalls as variables
-for call, id in syscalls.iteritems():
-    vars()[call] = id
+        @property
+        def undefined_property():
+            raise NotImplementedError("you can only access process members once a process has been attached")
+
+        self.arg0 = undefined_method
+        self.arg1 = undefined_method
+        self.arg2 = undefined_method
+        self.arg3 = undefined_method
+        self.arg4 = undefined_method
+        self.arg5 = undefined_method
+        self.get_syscall_number = undefined_method
+        self.pid = undefined_property
 
 
 def syscall(func):
-    def delegate(pid, *args, **kwargs):
-        if func(pid, *args, **kwargs):
+    def delegate(self, *args, **kwargs):
+        pid = self.pid
+        if func(self, *args, **kwargs):
             ptrace(PTRACE_SYSCALL, pid, None, None)
             return True
         return False
 
+    delegate.__syscall = True
     return delegate
 
 
@@ -32,13 +44,14 @@ def unsafe_syscall(func):
         Hence, here we stop all child tasks (SIGSTOP), execute the syscall, then resume all tasks (SIGCONT).
     """
 
-    def halter(pid, *args, **kwargs):
+    def halter(self, *args, **kwargs):
+        pid = self.pid
         tasks = map(int, os.listdir("/proc/%d/task" % pid))
         tasks.remove(pid)
         if tasks:
             for task in tasks:
                 os.kill(task, SIGSTOP)
-        ret = func(pid, *args, **kwargs)
+        ret = func(self, *args, **kwargs)
         if ret:
             ptrace(PTRACE_SYSCALL, pid, None, None)
         if tasks:
@@ -46,4 +59,5 @@ def unsafe_syscall(func):
                 os.kill(task, SIGCONT)
         return ret
 
+    halter.__syscall = True
     return halter
