@@ -3,6 +3,8 @@ import re
 from signal import *
 from _ptrace import *
 
+__all__ = ['ProcessDebugger', 'syscall', 'unsafe_syscall']
+
 
 class ProcessDebugger(object):
     def __init__(self):

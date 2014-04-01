@@ -9,7 +9,7 @@ from platform import architecture
 from ._ptrace import *
 
 
-def find_exe(path):
+def _find_exe(path):
     if os.path.isabs(path):
         return path
     if os.sep in path:
@@ -21,13 +21,10 @@ def find_exe(path):
     raise OSError()
 
 
-def get_bitness(path):
-    return architecture(path)[0]
-
-
 class SecurePopen(object):
     def __init__(self, args, debugger, time, memory):
         self._args = args
+        self._child = _find_exe(self._args[0])
         self._debugger = debugger
         self._time = time
         self._memory = memory
@@ -83,6 +80,10 @@ class SecurePopen(object):
     def tle(self):
         return self._tle
 
+    @property
+    def bitness(self):
+        return int(architecture(self._child)[0][:2])
+
     def __shocker(self):
         self._started.wait()
         time.sleep(self._time)
@@ -91,7 +92,6 @@ class SecurePopen(object):
             self._tle = True
 
     def __spawn_execute(self):
-        child = find_exe(self._args[0])
         child_args = self._args
 
         status = None
@@ -115,7 +115,7 @@ class SecurePopen(object):
             os.kill(os.getpid(), SIGSTOP)
             # Replace current process with the child process
             # This call does not return
-            os.execv(child, child_args)
+            os.execv(self._child, child_args)
             # Unless it does, of course, in which case you're screwed
             # We don't cover this in the warranty
             # When you reach here, you are screwed
@@ -127,7 +127,7 @@ class SecurePopen(object):
                 gc.enable()
 
             self._debugger.pid = pid
-            if get_bitness(child):
+            if self.bitness == 64:
                 import _ptrace64 as _ptrace
             else:
                 import _ptrace32 as _ptrace
