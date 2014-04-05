@@ -44,6 +44,9 @@ class CHROOTProcessDebugger(ProcessDebugger):
             sys_openat: do_allow,
             sys_getdents: do_allow,
             sys_lseek: do_allow,
+            sys_getrusage: do_allow,
+            sys_sigaltstack: do_allow,
+            sys_pipe: do_allow,
 
             sys_clone: do_allow,
             sys_exit_group: do_allow,
